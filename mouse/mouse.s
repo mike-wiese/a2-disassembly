@@ -1,6 +1,6 @@
 ; ============================================================
 ; Apple II Mouse Interface Card ROM  341-0270-c.4b
-;  disassembly by Mike Wiese 2026-06-11
+;  disassembly by Mike Wiese 2026-06-12
 ; ============================================================
 ;
 ; How the card works
@@ -171,7 +171,7 @@ WRITE_ACK        = $80         ; PB7  MCU -> Apple II  ack data written by Apple
 ;   4) Apple II sees READ_REQ low, lowers READ_ACK -> byte transferred
 
 ; ---- MCU command byte values -------------------------------
-; * not documented
+; * not documented, + partially documented
 CMD_SET          = $00         ; SetMouse
 CMD_READ         = $10         ; ReadMouse
 CMD_SERVE        = $20         ; ServeMouse
@@ -180,11 +180,11 @@ CMD_POS          = $40         ; PosMouse
 CMD_INIT         = $50         ; InitMouse
 CMD_CLAMP        = $60         ; ClampMouse
 CMD_HOME         = $70         ; HomeMouse
-CMD_TIME         = $90         ; TimeData
-CMD_IRQ_RATE     = $A0         ; * SetIRQRate
-CMD_CONFIG       = $B0         ; * ConfigMouse
-CMD_ACK_IRQ      = $C0         ; * AckIRQ
-CMD_RW_MEMORY    = $F0         ; * RWMemory
+CMD_VBL_DATA     = $90         ; MouseSetVBLData +
+CMD_VBL_FRAMES   = $A0         ; MouseSetVBLFrames *
+CMD_CONFIG       = $B0         ; MouseSetConfig *
+CMD_ACK_IRQ      = $C0         ; MouseAckIRQ *
+CMD_RW_MEMORY    = $F0         ; MouseRWMemory +
 
 ; Bank select values
 BANK0            = $00
@@ -278,12 +278,12 @@ MOUSE_OUT:                     ; our CSW entry point
     .byte <ClampMouse
     .byte <HomeMouse
     .byte <InitMouse
-    .byte <RWMemory            ; * documented as GetClamp in Mouse TN #7
-    .byte <CopyrightNotice     ; * not documented
-    .byte <TimeData
-    .byte <SetIRQRate          ; * not documented
-    .byte <ConfigMouse         ; * not documented
-    .byte <AckIRQ              ; * not documented
+    .byte <MouseRWMemory       ; + GetClamp in Mouse TN #7
+    .byte <MouseCredits        ; * not documented
+    .byte <MouseSetVBLData     ; + TimeData in Mouse TN #2
+    .byte <MouseSetVBLFrames   ; * not documented
+    .byte <MouseSetConfig      ; * not documented
+    .byte <MouseAckIRQ         ; * not documented
 
 MAIN:
 ; save processor state, will be restored in HOOKEXIT
@@ -315,7 +315,7 @@ MAIN:
     bcc B0_93                  ; V=0, C=0: via MOUSE_OUT hook, CSW character output -> B4_FN1
     bcs B0_9D                  ; V=0, C=1: via MOUSE_IN  hook, KSW character input  -> B4_FN2
 ; ==================================================================
-; RWMemory *
+; MouseRWMemory +
 ; Read or write MCU memory:
 ;   A=0: read  — send 16-bit address, MCU returns the byte there
 ;   A=1: write — send 16-bit address + byte, MCU stores it
@@ -334,32 +334,35 @@ MAIN:
 ;        CLAMP_MIN_HI = byte to write (write only)
 ; Exit:  C=0; on read, CLAMP_MIN_HI holds the byte read from the MCU
 ; ==================================================================
-RWMemory:
+MouseRWMemory:
     and #$01                   ; bit 0 selects access: 0=read, 1=write
     ora #CMD_RW_MEMORY
     sta MOUSE_CMD,x
     lda #BANK1
     bne B0_93                  ; always
 ; ==================================================================
-; TimeData *
+; MouseSetVBLData +
 ; Bits 0-3 of A are used to set VBL timer options.
-; Only bit 0 is documented (Mouse TN #2 "Set VBL Interrupt Rate").
+;
 ; Bits 2 and 3 pass parameters from the specified scratchpad locations.
 ;
 ;   bit  effect                                +bytes  parameter locations
 ;   ---  -------------------------------------  -----  -----------------------------
 ;    0   VBL rate select: 0 = 60 Hz, 1 = 50 Hz    0
-;    1   add $FC8E to MCU timer RELOAD            0
-;    2   add signed 16-bit delta to RELOAD        2    CLAMP_MIN_LO (lo), CLAMP_MAX_LO (hi)
+;    1   add $FC8E to MCU timer SEED              0
+;    2   add signed 16-bit delta to SEED          2    CLAMP_MIN_LO (lo), CLAMP_MAX_LO (hi)
 ;    3   set FRAMES_PER_IRQ (fire IRQ every N)    1    CLAMP_MIN_HI
+;
+; Bit 0 is documented in Mouse TN #2 "Set VBL Interrupt Rate"), the
+; rest are not documented.
 ;
 ; Entry: A = option bits (low nibble)
 ;        X = $Cn, Y = $n0
 ; Exit:  C=0
 ; ==================================================================
-TimeData:
+MouseSetVBLData:
     and #$0F
-    ora #CMD_TIME
+    ora #CMD_VBL_DATA
     bne B0_8E                  ; always
     .res 2, $FF
 B0_5B:
@@ -521,18 +524,18 @@ HomeMouse:
     lda #CMD_HOME
     bne B0_A6           ; always
 ; ==================================================================
-; SetIRQRate *
+; MouseSetVBLFrames *
 ; Set the mouse interrupt to fire once every N frames.
 ; Entry: A = frames per IRQ (N)
 ;        X = $Cn, Y = $n0
 ; Exit:  C=0
 ; ==================================================================
-SetIRQRate:
+MouseSetVBLFrames:
     pha                        ; save N
-    lda #CMD_IRQ_RATE
+    lda #CMD_VBL_FRAMES
     bne B0_8E                  ; always
 ; ==================================================================
-; ConfigMouse *
+; MouseSetConfig *
 ; Set the MCU's MOUSE_CONFIG byte (MCU memory location $5D):
 ;   bit 0 = half resolution (count clock rising edges only)
 ;   bit 1 = clear-on-read   (zero mouse position after ReadMouse)
@@ -540,26 +543,26 @@ SetIRQRate:
 ;        X = $Cn, Y = $n0
 ; Exit:  C=0
 ; ==================================================================
-ConfigMouse:
+MouseSetConfig:
     and #$0F
     ora #CMD_CONFIG
     bne B0_A6           ; always
 ; ==================================================================
-; AckIRQ *
+; MouseAckIRQ *
 ; Acknowledges a mouse interrupt.
 ; Entry: X = $Cn, Y = $n0
 ; Exit:  C=0
 ; ==================================================================
-AckIRQ:
+MouseAckIRQ:
     lda #CMD_ACK_IRQ
     bne B0_A6           ; always
 ; ==================================================================
-; CopyrightNotice
+; MouseCredits
 ; Print Copyright Notice
 ; Entry: X = $Cn, Y = $n0
 ; Exit:  C=0
 ; ==================================================================
-CopyrightNotice:
+MouseCredits:
     lda #BANK1
     bne B0_AB                  ; always
 ERR_STUB:
@@ -574,7 +577,7 @@ MOUSE_ID:
     .byte $01
 
 ; ==================================================================
-; BANK 1: CopyrightNotice, RWMemory
+; BANK 1: MouseCredits, MouseRWMemory
 ; Two dispatch paths via function code:
 ;   code=0 (B1_FN0): print the copyright notice
 ;   code=1 (B1_FN1): MCU memory read/write
@@ -656,7 +659,7 @@ B1_A0:
     beq B1_BANK_SWITCH         ; always
 ; ==================================================================
 ; B1_AB: RTS jump target
-; Reached after B1_A0 call #1 (sent the RWMemory MOUSE_CMD byte).
+; Reached after B1_A0 call #1 (sent the MouseRWMemory MOUSE_CMD byte).
 ; Now send the MCU address low byte (held in CLAMP_MIN_LO) via call #2.
 ; ==================================================================
 B1_AB:
@@ -923,7 +926,7 @@ B2_E4:
     .byte $C1
 
 ; ==================================================================
-; BANK 3: SetMouse, ServeMouse, ClearMouse, HomeMouse, ConfigMouse, AckIRQ
+; BANK 3: SetMouse, ServeMouse, ClearMouse, HomeMouse, MouseSetConfig, MouseAckIRQ
 ; Send command byte to the MCU; ServeMouse also reads a status byte back
 ; ==================================================================
     .org $0300
@@ -1327,7 +1330,7 @@ B5_CC:
     .byte $CD
 
 ; ==================================================================
-; BANK 6: ReadMouse, RWMemory, InitMouse, MOUSE_OUT, MOUSE_IN
+; BANK 6: ReadMouse, MouseRWMemory, InitMouse, MOUSE_OUT, MOUSE_IN
 ;
 ; Three entry points via function code:
 ;   code=0 (B6_FN0): send command byte (already on the stack) to the MCU;
@@ -1454,7 +1457,7 @@ DONE_READING:
     .byte $C1
 
 ; ==================================================================
-; BANK 7: ClampMouse, PosMouse, SetIRQRate, TimeData
+; BANK 7: ClampMouse, PosMouse, MouseSetVBLFrames, MouseSetVBLData
 ;
 ; MCU multi-byte write
 ;
@@ -1471,7 +1474,7 @@ B7_FN1:
     beq B7_18                  ; yes: send clamp bytes
     cmp #CMD_CLAMP+1           ; is it ClampMouse Y ($61)?
     beq B7_18                  ; yes: send clamp bytes
-    cmp #CMD_IRQ_RATE          ; is it SetIRQRate ($A0)?
+    cmp #CMD_VBL_FRAMES        ; is it MouseSetVBLFrames ($A0)?
     bne B7_41                  ; no: check other commands in B7_41
     pha                        ; yes: push command ($A0); rate byte already on stack
     lda #$02                   ; send 2 bytes (command + rate byte)
