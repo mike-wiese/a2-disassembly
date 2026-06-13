@@ -2,10 +2,10 @@ all: mouse.bin
 
 	md5sum --ignore-missing --check md5sums.txt
 
-mouse.o: mouse.s
+%.o: %.s
 	ca65 --target apple2 -l "$@.list" -o "$@" "$<"
 
-mouse.bin: mouse.o
+%.bin: %.o
 	ld65 --config apple2-asm.cfg -o "$@" "$<"
 
 clean:

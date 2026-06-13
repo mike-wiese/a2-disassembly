@@ -286,7 +286,7 @@ MOUSE_OUT:                     ; our CSW entry point
     .byte <MouseAckIRQ         ; * not documented
 
 MAIN:
-; save processor state, will be restored in HOOKEXIT
+; save processor state, will be restored in RESTORE_STATE
     php                        ; save flags
     sei                        ; disable interrupts
     sta MSLOT                  ; use MSLOT to save A temporarily
@@ -384,7 +384,8 @@ B0_BANK_SWITCH:
     beq EXIT_OK                ; function code 0: return success
     ror                        ; rotate function code: even -> C=0, odd -> C=1
     bcc EXIT_ERR               ; C=0: error exit
-HOOKEXIT:                      ; C=1: restore saved registers and return
+                               ; C=1: restore saved registers and return
+RESTORE_STATE:
     pla
     tax                        ; restore X
     pla
@@ -1114,13 +1115,13 @@ B4_BANK_SWITCH:
 ; ==================================================================
 ; B4_85: RTS jump target
 ; Reached from B4_FN1 after BANK6 sends the mode byte to the MCU.
-; Switch to BANK0 with function code 1: HOOKEXIT restores saved
+; Switch to BANK0 with function code 1: RESTORE_STATE restores saved
 ; registers and returns to the CSW caller.
 ; ==================================================================
 B4_85:
     lda #BANK0
     sta ROM_BANK,x
-    lda #$01                   ; function code 1 -> HOOKEXIT
+    lda #$01                   ; function code 1 -> RESTORE_STATE
     pha
     bne B4_BANK_SWITCH         ; always
 B4_8F:
@@ -1250,18 +1251,18 @@ B5_25:
 ; ==================================================================
 ; B5_44: RTS jump target
 ; Reached after B5_91 formats status digits. Store CR terminator,
-; set up fake X/Y/A for HOOKEXIT, then switch to BANK0 to return.
-; HOOKEXIT will restore: X=$11 (cursor pos), Y=$11, A=$8D (CR char).
+; set up fake X/Y/A for RESTORE_STATE, then switch to BANK0 to return.
+; RESTORE_STATE will restore: X=$11 (cursor pos), Y=$11, A=$8D (CR char).
 ; ==================================================================
 B5_44:
     lda #$8D                   ; A = CR character ($8D)
     sta INBUF+$11              ; CR terminator just past the status field
-    pha                        ; push $8D: HOOKEXIT will pop this as A (char to return to KEYIN)
+    pha                        ; push $8D: RESTORE_STATE will pop this as A (char to return to KEYIN)
     lda #$11                   ; $11 = 17: output cursor position / string length
-    pha                        ; push $11: HOOKEXIT pops as Y
-    pha                        ; push $11: HOOKEXIT pops as X
+    pha                        ; push $11: RESTORE_STATE pops as Y
+    pha                        ; push $11: RESTORE_STATE pops as X
     lda #BANK0
-    beq B5_BANK_SWITCH         ; always; dispatch to BANK0 -> HOOKEXIT
+    beq B5_BANK_SWITCH         ; always; dispatch to BANK0 -> RESTORE_STATE
     .res  18, $FF
 B5_BANK_SWITCH:
     ldx MSLOT                  ; X = $Cn
