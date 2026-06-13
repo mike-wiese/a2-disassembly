@@ -2,10 +2,10 @@ all: thunderclock.bin
 
 	md5sum --ignore-missing --check md5sums.txt
 
-thunderclock.o: thunderclock.s
+%.o: %.s
 	ca65 --target apple2 -l "$@.list" -o "$@" "$<"
 
-thunderclock.bin: thunderclock.o
+%.bin: %.o
 	ld65 --config apple2-asm.cfg -o "$@" "$<"
 
 clean:
