@@ -1,6 +1,7 @@
 ; ============================================================
 ; Apple II Mouse Interface Card ROM  341-0270-c.4b
-;  disassembly by Mike Wiese 2026-06-12
+;  disassembly by Mike Wiese
+;  last modified: 2026-06-13
 ; ============================================================
 ;
 ; How the card works
@@ -180,6 +181,7 @@ CMD_POS          = $40         ; PosMouse
 CMD_INIT         = $50         ; InitMouse
 CMD_CLAMP        = $60         ; ClampMouse
 CMD_HOME         = $70         ; HomeMouse
+CMD_TRANSPARENT  = $80         ; set transparent mode, see IIc Tech Ref *
 CMD_VBL_DATA     = $90         ; MouseSetVBLData +
 CMD_VBL_FRAMES   = $A0         ; MouseSetVBLFrames *
 CMD_CONFIG       = $B0         ; MouseSetConfig *
@@ -1047,7 +1049,7 @@ B4_FN1:
     pla                        ; pop character
     cmp #$8D                   ; CR ?
     beq B4_85                  ; yes -> exit
-    and #$01                   ; keep only bit 0, the mouse active flag
+    and #$01                   ; only keep "mouse is on" bit
     ora #BANK4<<4              ; upper nibble = BANK4
     sta MOUSE_MODE,x
     txa                        ; A = $Cn
@@ -1055,12 +1057,12 @@ B4_FN1:
     lda #<B4_85-1              ; lo byte for the RTS jump
     pha
     lda MOUSE_MODE,x
-    lsr                        ; bit 0 (mouse active) -> carry
-    lda #$80                   ; A = $80
-    bcs B4_26                  ; mouse active = 1 -> keep $80
-    asl                        ; mouse active = 0 -> A = $00
+    lsr                        ; bit 0 (mouse is on) -> carry
+    lda #CMD_TRANSPARENT       ; A = $80
+    bcs B4_26                  ; mouse on = 1 -> keep CMD_TRANSPARENT ($80)
+    asl                        ; mouse on = 0 -> A = CMD_SET mouse off ($00)
 B4_26:
-    pha                        ; push mode byte to send to MCU
+    pha                        ; push command byte to send to MCU
     lda #BANK6
     sta ROM_BANK,x
     lda #$00                   ; function code 0
@@ -1074,7 +1076,7 @@ B4_31:
     sta KSWL                   ; install MOUSE_IN hook, fall thru to handle character
 B4_FN2:
     lda MOUSE_MODE,x
-    and #$01                   ; is mouse currently active (mode bit 0) ?
+    and #$01                   ; is mouse currently on (mode bit 0) ?
     bne B4_54                  ; yes: continue to read and format mouse info
     pla                        ; no: discard 4 of 5 registers saved in MAIN, leaving the flags
     pla
@@ -1088,7 +1090,7 @@ B4_FN2:
     beq B4_90                  ; always
 B4_54:
     lda MOUSE_MODE,x
-    and #$01                   ; keep mouse active bit
+    and #$01                   ; only keep "mouse is on" bit
     ora #BANK4<<4              ; upper nibble = BANK4: B6_51 will route back here
     sta MOUSE_MODE,x
     txa                        ; A = $Cn
@@ -1128,7 +1130,7 @@ B4_8F:
     rts
 B4_90:
     lda #$C0                   ; $C0 = button is down, button was down
-    sta MOUSE_STATUS,x         ; set status for mouse inactive case
+    sta MOUSE_STATUS,x         ; set status for mouse off case
 B4_TO_B5:
     sty SLOTX16                ; save Y = slot*$10
     lda #BANK5
@@ -1336,7 +1338,7 @@ B5_CC:
 ; Three entry points via function code:
 ;   code=0 (B6_FN0): send command byte (already on the stack) to the MCU;
 ;   code=1 (B6_FN1): read a single byte from the MCU
-;   code=2 (B6_FN2): ReadMouse: if mouse active, send CMD_READ and read 5
+;   code=2 (B6_FN2): ReadMouse: if mouse is on, send CMD_READ and read 5
 ;                    bytes (XLO,XHI,YLO,YHI,STATUS) into the screen holes
 ; ==================================================================
     .org $0600
@@ -1345,7 +1347,7 @@ B6_FN0:
     clv                        ; clear V: send command, no response
     bvc B6_SEND_CMD            ; always
 B6_FN2:
-    lda MOUSE_MODE,x           ; is mouse active (mode bit 0)?
+    lda MOUSE_MODE,x           ; is mouse on (mode bit 0)?
     and #$01
     beq B6_51                  ; no: switch to bank 0 and return
     lda #CMD_READ
